@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, ChevronDown, ChevronUp, Trash2, Edit2, TrendingUp, AlertTriangle } from 'lucide-react';
 import type { Ingredient, IngredientCategory, Unit, PriceEntry } from '../types';
-import { getIngredients, upsertIngredient, deleteIngredient, getCurrentPrice } from '../store';
+import { getIngredients, createIngredient, updateIngredient, deleteIngredient, addPrice, deletePrice, getCurrentPrice } from '../api';
 import { nanoid } from '../utils';
 
 const CATEGORIES: IngredientCategory[] = ['oil', 'butter', 'lye', 'liquid', 'fragrance', 'colorant', 'additive', 'packaging', 'other'];
@@ -39,17 +39,16 @@ export default function Ingredients() {
   const [filter, setFilter] = useState<IngredientCategory | 'all'>('all');
   const [search, setSearch] = useState('');
 
-  useEffect(() => { setIngredients(getIngredients()); }, []);
+  const refresh = () => getIngredients().then(setIngredients);
+  useEffect(() => { refresh(); }, []);
 
-  const refresh = () => setIngredients(getIngredients());
-
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!form.name.trim()) return;
     if (editingId) {
       const existing = ingredients.find((i) => i.id === editingId)!;
-      upsertIngredient({ ...existing, ...form });
+      await updateIngredient({ ...existing, ...form });
     } else {
-      upsertIngredient({ ...form, id: nanoid(), priceHistory: [], createdAt: new Date().toISOString() });
+      await createIngredient({ ...form, id: nanoid(), priceHistory: [], createdAt: new Date().toISOString() });
     }
     setForm(emptyForm());
     setShowForm(false);
@@ -63,26 +62,24 @@ export default function Ingredients() {
     setShowForm(true);
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (!confirm('Delete this ingredient?')) return;
-    deleteIngredient(id);
+    await deleteIngredient(id);
     refresh();
   };
 
-  const handleAddPrice = (ingId: string) => {
+  const handleAddPrice = async (ingId: string) => {
     const price = parseFloat(priceForm.price);
     if (isNaN(price) || price <= 0) return;
-    const ing = ingredients.find((i) => i.id === ingId)!;
     const entry: PriceEntry = { id: nanoid(), date: priceForm.date, price, supplier: priceForm.supplier, notes: priceForm.notes };
-    upsertIngredient({ ...ing, priceHistory: [...ing.priceHistory, entry] });
+    await addPrice(ingId, entry);
     setPriceForm({ price: '', supplier: '', notes: '', date: new Date().toISOString().slice(0, 10) });
     setAddingPriceFor(null);
     refresh();
   };
 
-  const handleDeletePrice = (ingId: string, priceId: string) => {
-    const ing = ingredients.find((i) => i.id === ingId)!;
-    upsertIngredient({ ...ing, priceHistory: ing.priceHistory.filter((p) => p.id !== priceId) });
+  const handleDeletePrice = async (ingId: string, priceId: string) => {
+    await deletePrice(ingId, priceId);
     refresh();
   };
 
@@ -90,7 +87,7 @@ export default function Ingredients() {
     .filter((i) => filter === 'all' || i.category === filter)
     .filter((i) => i.name.toLowerCase().includes(search.toLowerCase()));
 
-  const lowStock = ingredients.filter((i) => i.currentStock <= i.lowStockThreshold && i.currentStock > 0);
+  const lowStock = ingredients.filter((i) => i.currentStock > 0 && i.currentStock <= i.lowStockThreshold);
   const outOfStock = ingredients.filter((i) => i.currentStock === 0);
 
   return (
@@ -108,7 +105,6 @@ export default function Ingredients() {
         </button>
       </div>
 
-      {/* Alerts */}
       {(lowStock.length > 0 || outOfStock.length > 0) && (
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start gap-2">
           <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
@@ -119,7 +115,6 @@ export default function Ingredients() {
         </div>
       )}
 
-      {/* Add/Edit Form */}
       {showForm && (
         <div className="bg-white rounded-xl border border-[#e8d5c4] p-5 shadow-sm">
           <h3 className="font-semibold text-[#3d2b1f] mb-4">{editingId ? 'Edit Ingredient' : 'New Ingredient'}</h3>
@@ -160,7 +155,6 @@ export default function Ingredients() {
         </div>
       )}
 
-      {/* Filters */}
       <div className="flex flex-wrap gap-2 items-center">
         <input className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-[#d4956a] w-48" placeholder="Search..." value={search} onChange={(e) => setSearch(e.target.value)} />
         <button onClick={() => setFilter('all')} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${filter === 'all' ? 'bg-[#3d2b1f] text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>All</button>
@@ -171,7 +165,6 @@ export default function Ingredients() {
         ))}
       </div>
 
-      {/* List */}
       <div className="space-y-2">
         {filtered.length === 0 && (
           <div className="bg-white rounded-xl border border-[#e8d5c4] p-8 text-center text-gray-400">
@@ -198,9 +191,8 @@ export default function Ingredients() {
                   <div className="flex gap-4 mt-1 text-sm text-gray-500 flex-wrap">
                     <span>Stock: <span className={`font-medium ${isOut ? 'text-red-600' : isLow ? 'text-amber-600' : 'text-gray-700'}`}>{ing.currentStock} {ing.unit}</span></span>
                     <span>Price: <span className="font-medium text-gray-700">{currentPrice != null ? `$${currentPrice.toFixed(3)}/${ing.unit}` : '—'}</span></span>
-                    {ing.priceHistory.length > 1 && (() => {
-                      const prev = sortedHistory[1].price;
-                      const diff = currentPrice! - prev;
+                    {sortedHistory.length > 1 && (() => {
+                      const diff = currentPrice! - sortedHistory[1].price;
                       return diff !== 0 ? (
                         <span className={`flex items-center gap-0.5 font-medium ${diff > 0 ? 'text-red-500' : 'text-green-600'}`}>
                           <TrendingUp className="w-3 h-3" />{diff > 0 ? '+' : ''}{diff.toFixed(3)} vs prev
@@ -222,7 +214,6 @@ export default function Ingredients() {
 
               {isExpanded && (
                 <div className="border-t border-[#f0e4d8] px-4 pb-4">
-                  {/* Add price form */}
                   {addingPriceFor === ing.id && (
                     <div className="mt-3 bg-[#f8f5f2] rounded-lg p-3">
                       <p className="text-xs font-semibold text-gray-600 mb-2">Record New Price</p>
@@ -250,8 +241,6 @@ export default function Ingredients() {
                       </div>
                     </div>
                   )}
-
-                  {/* Price history */}
                   {sortedHistory.length > 0 && (
                     <div className="mt-3">
                       <p className="text-xs font-semibold text-gray-600 mb-2">Price History</p>

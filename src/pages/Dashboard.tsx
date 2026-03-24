@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, Package, BookOpen, DollarSign, TrendingUp } from 'lucide-react';
-import { getIngredients, getRecipes, getCurrentPrice, calcRecipeCost } from '../store';
+import { getIngredients, getRecipes, getCurrentPrice, calcRecipeCost } from '../api';
 import type { Ingredient, Recipe } from '../types';
 import { formatCurrency } from '../utils';
 import { Link } from 'react-router-dom';
@@ -10,37 +10,31 @@ export default function Dashboard() {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
 
   useEffect(() => {
-    setIngredients(getIngredients());
-    setRecipes(getRecipes());
+    Promise.all([getIngredients(), getRecipes()]).then(([i, r]) => { setIngredients(i); setRecipes(r); });
   }, []);
 
   const lowStock = ingredients.filter((i) => i.currentStock > 0 && i.currentStock <= i.lowStockThreshold);
   const outOfStock = ingredients.filter((i) => i.currentStock === 0);
-  const totalIngredients = ingredients.length;
-  const totalRecipes = recipes.length;
 
-  // Inventory value estimate
   const inventoryValue = ingredients.reduce((total, ing) => {
     const price = getCurrentPrice(ing);
     if (price == null) return total;
     return total + price * ing.currentStock;
   }, 0);
 
-  // Most recent price changes
   const priceChanges = ingredients
     .filter((i) => i.priceHistory.length >= 2)
     .map((i) => {
       const sorted = [...i.priceHistory].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       const diff = sorted[0].price - sorted[1].price;
       const pct = (diff / sorted[1].price) * 100;
-      return { ing: i, current: sorted[0].price, prev: sorted[1].price, diff, pct, date: sorted[0].date };
+      return { ing: i, current: sorted[0].price, diff, pct, date: sorted[0].date };
     })
     .sort((a, b) => Math.abs(b.pct) - Math.abs(a.pct))
     .slice(0, 5);
 
-  // Recipe costs
   const recipeCosts = recipes
-    .map((r) => ({ recipe: r, cost: calcRecipeCost(r, ingredients) }))
+    .map((r) => ({ recipe: r, cost: calcRecipeCost(r.ingredients, ingredients) }))
     .filter((rc) => rc.cost > 0)
     .sort((a, b) => b.cost - a.cost)
     .slice(0, 5);
@@ -52,15 +46,13 @@ export default function Dashboard() {
         <p className="text-sm text-gray-500">Overview of your soap studio</p>
       </div>
 
-      {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard icon={<Package className="w-5 h-5 text-[#d4956a]" />} label="Ingredients" value={totalIngredients.toString()} sub={`${outOfStock.length} out of stock`} />
-        <StatCard icon={<BookOpen className="w-5 h-5 text-[#d4956a]" />} label="Recipes" value={totalRecipes.toString()} sub="saved" />
+        <StatCard icon={<Package className="w-5 h-5 text-[#d4956a]" />} label="Ingredients" value={ingredients.length.toString()} sub={`${outOfStock.length} out of stock`} />
+        <StatCard icon={<BookOpen className="w-5 h-5 text-[#d4956a]" />} label="Recipes" value={recipes.length.toString()} sub="saved" />
         <StatCard icon={<DollarSign className="w-5 h-5 text-[#d4956a]" />} label="Inventory Value" value={formatCurrency(inventoryValue)} sub="at current prices" />
         <StatCard icon={<AlertTriangle className="w-5 h-5 text-amber-500" />} label="Alerts" value={(lowStock.length + outOfStock.length).toString()} sub={`${outOfStock.length} out · ${lowStock.length} low`} warn={lowStock.length + outOfStock.length > 0} />
       </div>
 
-      {/* Alerts */}
       {(outOfStock.length > 0 || lowStock.length > 0) && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
           <div className="flex items-center gap-2 mb-2">
@@ -88,7 +80,6 @@ export default function Dashboard() {
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Price changes */}
         <div className="bg-white rounded-xl border border-[#e8d5c4] p-4 shadow-sm">
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-semibold text-[#3d2b1f] text-sm flex items-center gap-2"><TrendingUp className="w-4 h-4 text-[#d4956a]" /> Recent Price Changes</h3>
@@ -114,7 +105,6 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* Recipe costs */}
         <div className="bg-white rounded-xl border border-[#e8d5c4] p-4 shadow-sm">
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-semibold text-[#3d2b1f] text-sm flex items-center gap-2"><BookOpen className="w-4 h-4 text-[#d4956a]" /> Recipe Costs</h3>
@@ -139,8 +129,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Getting started */}
-      {totalIngredients === 0 && totalRecipes === 0 && (
+      {ingredients.length === 0 && recipes.length === 0 && (
         <div className="bg-white rounded-xl border border-[#e8d5c4] p-6 text-center shadow-sm">
           <div className="text-4xl mb-3">🧼</div>
           <h3 className="font-bold text-[#3d2b1f] mb-1">Welcome to Soap Studio!</h3>

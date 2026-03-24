@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, Trash2, Edit2, ChevronDown, ChevronUp, BookOpen } from 'lucide-react';
 import type { Recipe, RecipeIngredient, Unit, Ingredient } from '../types';
-import { getRecipes, upsertRecipe, deleteRecipe, getIngredients, getCurrentPrice, calcRecipeCost } from '../store';
+import { getRecipes, createRecipe, updateRecipe, deleteRecipe, getIngredients, getCurrentPrice, calcRecipeCost } from '../api';
 import { nanoid, formatCurrency } from '../utils';
 
 const UNITS: Unit[] = ['oz', 'lb', 'g', 'kg', 'ml', 'L', 'each'];
@@ -26,24 +26,17 @@ export default function Recipes() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
 
-  useEffect(() => {
-    setRecipes(getRecipes());
-    setIngredients(getIngredients());
-  }, []);
+  const refresh = () => Promise.all([getRecipes(), getIngredients()]).then(([r, i]) => { setRecipes(r); setIngredients(i); });
+  useEffect(() => { refresh(); }, []);
 
-  const refresh = () => {
-    setRecipes(getRecipes());
-    setIngredients(getIngredients());
-  };
-
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!form.name.trim()) return;
     const now = new Date().toISOString();
     if (editingId) {
       const existing = recipes.find((r) => r.id === editingId)!;
-      upsertRecipe({ ...existing, ...form, updatedAt: now });
+      await updateRecipe({ ...existing, ...form, updatedAt: now });
     } else {
-      upsertRecipe({ ...form, id: nanoid(), createdAt: now, updatedAt: now });
+      await createRecipe({ ...form, id: nanoid(), createdAt: now, updatedAt: now });
     }
     setForm(emptyRecipe());
     setShowForm(false);
@@ -67,17 +60,14 @@ export default function Recipes() {
     setExpandedId(null);
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (!confirm('Delete this recipe?')) return;
-    deleteRecipe(id);
+    await deleteRecipe(id);
     refresh();
   };
 
   const addIngredientLine = () => {
-    setForm((f) => ({
-      ...f,
-      ingredients: [...f.ingredients, { ingredientId: '', amount: 0, unit: 'oz' }],
-    }));
+    setForm((f) => ({ ...f, ingredients: [...f.ingredients, { ingredientId: '', amount: 0, unit: 'oz' }] }));
   };
 
   const updateIngredientLine = (idx: number, patch: Partial<RecipeIngredient>) => {
@@ -109,7 +99,6 @@ export default function Recipes() {
         </button>
       </div>
 
-      {/* Form */}
       {showForm && (
         <div className="bg-white rounded-xl border border-[#e8d5c4] p-5 shadow-sm">
           <h3 className="font-semibold text-[#3d2b1f] mb-4">{editingId ? 'Edit Recipe' : 'New Recipe'}</h3>
@@ -138,7 +127,6 @@ export default function Recipes() {
             </div>
           </div>
 
-          {/* Ingredients */}
           <div className="mt-4">
             <div className="flex items-center justify-between mb-2">
               <label className="text-xs font-semibold text-gray-600">Ingredients</label>
@@ -148,26 +136,12 @@ export default function Recipes() {
             <div className="space-y-2">
               {form.ingredients.map((ri, idx) => (
                 <div key={idx} className="flex gap-2 items-center">
-                  <select
-                    className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-[#d4956a]"
-                    value={ri.ingredientId}
-                    onChange={(e) => updateIngredientLine(idx, { ingredientId: e.target.value })}
-                  >
+                  <select className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-[#d4956a]" value={ri.ingredientId} onChange={(e) => updateIngredientLine(idx, { ingredientId: e.target.value })}>
                     <option value="">-- Select ingredient --</option>
                     {ingredients.map((i) => <option key={i.id} value={i.id}>{i.name} ({i.unit})</option>)}
                   </select>
-                  <input
-                    type="number" min="0" step="0.01"
-                    className="w-24 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-[#d4956a]"
-                    value={ri.amount}
-                    onChange={(e) => updateIngredientLine(idx, { amount: parseFloat(e.target.value) || 0 })}
-                    placeholder="Amount"
-                  />
-                  <select
-                    className="w-20 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-[#d4956a]"
-                    value={ri.unit}
-                    onChange={(e) => updateIngredientLine(idx, { unit: e.target.value as Unit })}
-                  >
+                  <input type="number" min="0" step="0.01" className="w-24 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-[#d4956a]" value={ri.amount} onChange={(e) => updateIngredientLine(idx, { amount: parseFloat(e.target.value) || 0 })} placeholder="Amount" />
+                  <select className="w-20 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-[#d4956a]" value={ri.unit} onChange={(e) => updateIngredientLine(idx, { unit: e.target.value as Unit })}>
                     {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
                   </select>
                   <button onClick={() => removeIngredientLine(idx)} className="text-gray-300 hover:text-red-400"><Trash2 className="w-4 h-4" /></button>
@@ -176,7 +150,6 @@ export default function Recipes() {
             </div>
           </div>
 
-          {/* Instructions */}
           <div className="mt-3">
             <label className="block text-xs font-medium text-gray-600 mb-1">Instructions</label>
             <textarea rows={4} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#d4956a] resize-none" value={form.instructions} onChange={(e) => setForm({ ...form, instructions: e.target.value })} placeholder="Step-by-step instructions..." />
@@ -193,10 +166,8 @@ export default function Recipes() {
         </div>
       )}
 
-      {/* Search */}
       <input className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-[#d4956a] w-56" placeholder="Search recipes..." value={search} onChange={(e) => setSearch(e.target.value)} />
 
-      {/* Recipe list */}
       <div className="space-y-2">
         {filtered.length === 0 && (
           <div className="bg-white rounded-xl border border-[#e8d5c4] p-8 text-center text-gray-400">
@@ -205,7 +176,7 @@ export default function Recipes() {
           </div>
         )}
         {filtered.map((recipe) => {
-          const cost = calcRecipeCost(recipe, ingredients);
+          const cost = calcRecipeCost(recipe.ingredients, ingredients);
           const costPerBar = recipe.barsPerBatch && recipe.barsPerBatch > 0 ? cost / recipe.barsPerBatch : null;
           const isExpanded = expandedId === recipe.id;
 
